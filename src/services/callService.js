@@ -135,5 +135,18 @@ export const callService = {
         }, error => {
             console.error(`Error listening for ${type} candidates:`, error);
         });
+    },
+    /**
+     * Update call type (e.g., voice to video)
+     */
+    async updateCallType(callId, callType) {
+        try {
+            await updateDoc(doc(db, CALLS_COLLECTION, callId), {
+                callType,
+                updatedAt: serverTimestamp(),
+            });
+        } catch (error) {
+            console.error('Error updating call type:', error);
+        }
     }
 };

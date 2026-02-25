@@ -17,6 +17,7 @@ import {
 } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 import { uploadToCloudinary } from '../utils/cloudinaryHelper';
+import { notificationService } from './notificationService';
 
 export const chatService = {
     // ─── Generate chat ID ──────────────────────────────────────────────────────
@@ -92,6 +93,17 @@ export const chatService = {
                 }
             }, { merge: true });
 
+            // ─── Trigger Notification ───
+            const senderSnap = await getDoc(doc(db, 'users', senderId));
+            const senderName = senderSnap.data()?.name || 'Someone';
+            await notificationService.createNotification(
+                otherId,
+                'message',
+                senderName,
+                trimmedText,
+                { chatId, senderId, type: 'direct' }
+            );
+
             return { success: true, messageId: newMessage.id };
         } catch (error) {
             console.error('sendMessage error:', error);
@@ -140,6 +152,17 @@ export const chatService = {
                     [otherId]: currentUnread + 1
                 }
             }, { merge: true });
+
+            // ─── Trigger Notification ───
+            const senderSnap = await getDoc(doc(db, 'users', senderId));
+            const senderName = senderSnap.data()?.name || 'Someone';
+            await notificationService.createNotification(
+                otherId,
+                'message',
+                senderName,
+                '📷 Sent a photo',
+                { chatId, senderId, type: 'direct' }
+            );
 
             console.log('[ChatService] Chat record updated. Success!');
             return { success: true, messageId: newMessage.id, imageUrl };
@@ -219,23 +242,41 @@ export const chatService = {
     },
 
     // ─── Subscribe to messages (realtime) ─────────────────────────────────────
-    subscribeToMessages: (chatId, callback) => {
+    subscribeToMessages: (chatId, userId, callback) => {
         try {
             if (!chatId) return () => { };
+
+            // First get the clearedAt for the user
+            const chatRef = doc(db, 'chats', chatId);
+            let clearedAt = 0;
+
+            const unsubChat = onSnapshot(chatRef, (snap) => {
+                if (snap.exists()) {
+                    clearedAt = snap.data().clearedAt?.[userId]?.toMillis?.() || 0;
+                }
+            });
+
             const messagesRef = collection(db, 'chats', chatId, 'messages');
             const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
-            return onSnapshot(q, (snapshot) => {
-                const messages = snapshot.docs.map((doc) => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    timestamp: doc.data().timestamp?.toMillis?.() || Date.now(),
-                }));
+            const unsubMsgs = onSnapshot(q, (snapshot) => {
+                const messages = snapshot.docs
+                    .map((doc) => ({
+                        id: doc.id,
+                        ...doc.data(),
+                        timestamp: doc.data().timestamp?.toMillis?.() || Date.now(),
+                    }))
+                    .filter(m => m.timestamp > clearedAt);
                 callback(messages);
             }, (error) => {
                 console.error('subscribeToMessages error:', error);
                 callback([]);
             });
+
+            return () => {
+                unsubChat();
+                unsubMsgs();
+            };
         } catch (error) {
             console.error('subscribeToMessages setup error:', error);
             return () => { };
@@ -243,7 +284,7 @@ export const chatService = {
     },
 
     // ─── Mark messages as read ─────────────────────────────────────────────────
-    markMessagesAsRead: async (chatId, messageIds) => {
+    markMessagesAsRead: async (chatId, messageIds, currentUserId) => {
         try {
             if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) {
                 return { success: false };
@@ -253,6 +294,16 @@ export const chatService = {
                 const ref = doc(db, 'chats', chatId, 'messages', id);
                 batch.update(ref, { read: true });
             });
+
+            // Also reset unreadCount for this user in the chat document
+            if (currentUserId) {
+                const chatRef = doc(db, 'chats', chatId);
+                batch.update(chatRef, {
+                    [`unreadCount.${currentUserId}`]: 0,
+                    updatedAt: serverTimestamp(),
+                });
+            }
+
             await batch.commit();
             return { success: true };
         } catch (error) {
@@ -393,6 +444,21 @@ export const chatService = {
         } catch (error) {
             console.error('deleteChat error:', error);
             return { success: false, error: 'Failed to delete chat' };
+        }
+    },
+
+    // ─── Clear Messages for User ────────────────────────────────────────────────
+    clearMessages: async (chatId, userId) => {
+        try {
+            if (!chatId || !userId) return { success: false, error: 'Missing IDs' };
+            const chatRef = doc(db, 'chats', chatId);
+            await updateDoc(chatRef, {
+                [`clearedAt.${userId}`]: serverTimestamp()
+            });
+            return { success: true };
+        } catch (error) {
+            console.error('clearMessages error:', error);
+            return { success: false, error: 'Failed to clear messages' };
         }
     },
 };

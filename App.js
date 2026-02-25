@@ -3,6 +3,7 @@ import { LogBox } from 'react-native';
 import { AuthProvider } from './src/context/AuthContext';
 import { SettingsProvider } from './src/context/SettingsContext';
 import AppNavigator from './src/navigation/AppNavigator';
+import { NotificationHandler } from './src/components/NotificationHandler';
 
 LogBox.ignoreLogs(['Non-serializable values were found in the navigation state']);
 

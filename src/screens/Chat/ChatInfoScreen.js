@@ -14,6 +14,10 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { spacing, borderRadius, shadows } from '../../constants';
 import { useSettings } from '../../context/SettingsContext';
+import { useAuth } from '../../hooks/useAuth';
+import { userService } from '../../services/userService';
+import { chatService } from '../../services/chatService';
+import { useEffect } from 'react';
 
 const { width } = Dimensions.get('window');
 
@@ -42,27 +46,68 @@ const MenuItem = ({ icon, label, onPress, color, rightElement, border = true, co
 
 export const ChatInfoScreen = ({ route, navigation }) => {
     const { otherUser, chatId } = route.params;
-    const { colors, t } = useSettings();
+    const { colors, t, chatWallpapers, updateChatWallpaper } = useSettings();
+    const { user } = useAuth();
+    const [isBlocked, setIsBlocked] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [disappearingMessages, setDisappearingMessages] = useState(false);
+
+    useEffect(() => {
+        checkBlockStatus();
+    }, []);
+
+    const checkBlockStatus = async () => {
+        if (!user || !otherUser) return;
+        const blocked = await userService.isUserBlocked(user.uid, otherUser.uid);
+        setIsBlocked(blocked);
+    };
 
     const handleClearChat = () => {
         Alert.alert(t('clearChat') || 'Clear Chat', t('clearChatConfirm') || 'Are you sure you want to clear all messages?', [
             { text: t('cancel') || 'Cancel', style: 'cancel' },
-            { text: t('clear') || 'Clear', style: 'destructive', onPress: () => { } }
+            {
+                text: t('clear') || 'Clear',
+                style: 'destructive',
+                onPress: async () => {
+                    const res = await chatService.clearMessages(chatId, user.uid);
+                    if (res.success) {
+                        Alert.alert(t('success'), t('chatCleared') || 'Chat history cleared for you.');
+                    }
+                }
+            }
         ]);
     };
 
     const handleBlock = () => {
-        Alert.alert(t('blockUser') || 'Block User', t('blockConfirm') || `Are you sure you want to block ${otherUser?.name}?`, [
+        const title = isBlocked ? (t('unblockUser') || 'Unblock User') : (t('blockUser') || 'Block User');
+        const msg = isBlocked
+            ? (t('unblockConfirm') || `Are you sure you want to unblock ${otherUser?.name}?`)
+            : (t('blockConfirm') || `Are you sure you want to block ${otherUser?.name}?`);
+
+        Alert.alert(title, msg, [
             { text: t('cancel') || 'Cancel', style: 'cancel' },
-            { text: t('block') || 'Block', style: 'destructive', onPress: () => { } }
+            {
+                text: isBlocked ? (t('unblock') || 'Unblock') : (t('block') || 'Block'),
+                style: 'destructive',
+                onPress: async () => {
+                    const res = isBlocked
+                        ? await userService.unblockUser(user.uid, otherUser.uid)
+                        : await userService.blockUser(user.uid, otherUser.uid);
+
+                    if (res.success) {
+                        setIsBlocked(!isBlocked);
+                        Alert.alert(t('success'), isBlocked ? t('unblocked') : t('blocked'));
+                    }
+                }
+            }
         ]);
     };
 
     const name = otherUser?.name || 'User';
     const email = otherUser?.email || '';
     const initial = name.charAt(0).toUpperCase();
+
+    const currentWallpaper = chatWallpapers[chatId] || 'default';
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -170,6 +215,38 @@ export const ChatInfoScreen = ({ route, navigation }) => {
                     />
                 </InfoCard>
 
+                {/* ── Chat Customization ── */}
+                <InfoCard title={t('chatSettings') || 'Chat Customization'} colors={colors}>
+                    <View style={styles.wallpaperSection}>
+                        <View style={styles.sectionHeader}>
+                            <Ionicons name="image-outline" size={20} color={colors.primary} />
+                            <Text style={[styles.sectionHeaderText, { color: colors.text }]}>{t('wallpaper') || 'Chat Wallpaper'}</Text>
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.wallpaperPicker}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.wallpaperOption,
+                                    { backgroundColor: colors.bgSecondary, borderColor: currentWallpaper === 'default' ? colors.primary : colors.divider }
+                                ]}
+                                onPress={() => updateChatWallpaper(chatId, 'default')}
+                            >
+                                <Text style={[styles.wallpaperText, { color: colors.textSecondary }]}>{t('default')}</Text>
+                            </TouchableOpacity>
+
+                            {['#F0F2F5', '#E3F2FD', '#F5F5F5', '#E8F5E9', '#FFF3E0', '#F3E5F5'].map((color) => (
+                                <TouchableOpacity
+                                    key={color}
+                                    style={[
+                                        styles.wallpaperOption,
+                                        { backgroundColor: color, borderColor: currentWallpaper === color ? colors.primary : colors.divider }
+                                    ]}
+                                    onPress={() => updateChatWallpaper(chatId, color)}
+                                />
+                            ))}
+                        </ScrollView>
+                    </View>
+                </InfoCard>
+
                 {/* ── Contact Details ── */}
                 <InfoCard title={name} colors={colors}>
                     <View style={styles.detailItem}>
@@ -193,7 +270,7 @@ export const ChatInfoScreen = ({ route, navigation }) => {
                     />
                     <MenuItem
                         icon="ban-outline"
-                        label={`${t('block') || 'Block'} ${name}`}
+                        label={isBlocked ? `${t('unblock') || 'Unblock'} ${name}` : `${t('block') || 'Block'} ${name}`}
                         color={colors.error}
                         onPress={handleBlock}
                         colors={colors}
@@ -370,5 +447,35 @@ const styles = StyleSheet.create({
     },
     bottomGap: {
         height: 60,
+    },
+    wallpaperSection: {
+        padding: spacing.lg,
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 16,
+    },
+    sectionHeaderText: {
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    wallpaperPicker: {
+        gap: 12,
+        paddingRight: 20,
+    },
+    wallpaperOption: {
+        width: 60,
+        height: 80,
+        borderRadius: 12,
+        borderWidth: 2,
+        justifyContent: 'center',
+        alignItems: 'center',
+        ...shadows.sm,
+    },
+    wallpaperText: {
+        fontSize: 10,
+        fontWeight: 'bold',
     },
 });

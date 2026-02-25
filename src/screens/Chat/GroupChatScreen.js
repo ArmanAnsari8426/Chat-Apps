@@ -15,6 +15,7 @@ import {
     Image,
     Alert,
     StatusBar,
+    ImageBackground,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -35,7 +36,10 @@ const avatarColor = (name = '') => {
 export const GroupChatScreen = ({ route, navigation }) => {
     const { groupId } = route.params;
     const { user } = useAuth();
-    const { colors, t, activeTheme } = useSettings();
+    const { colors, t, activeTheme, setActiveChat, wallpaper: globalWallpaper, chatWallpapers } = useSettings();
+
+    const perGroupWallpaper = (groupId && chatWallpapers) ? chatWallpapers[groupId] : null;
+    const wallpaper = (perGroupWallpaper && perGroupWallpaper !== 'default') ? perGroupWallpaper : globalWallpaper;
 
     const [group, setGroup] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -49,7 +53,9 @@ export const GroupChatScreen = ({ route, navigation }) => {
 
     useEffect(() => {
         navigation.setOptions({ headerShown: false });
-    }, [navigation]);
+        setActiveChat({ type: 'group', id: groupId });
+        return () => setActiveChat(null);
+    }, [navigation, groupId, setActiveChat]);
 
     useEffect(() => {
         if (!groupId) return;
@@ -198,20 +204,42 @@ export const GroupChatScreen = ({ route, navigation }) => {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-                <FlatList
-                    ref={listRef}
-                    data={messages}
-                    keyExtractor={item => item.id}
-                    renderItem={renderMessage}
-                    contentContainerStyle={s.msgList}
-                    ListEmptyComponent={
-                        <View style={s.center}>
-                            <MaterialCommunityIcons name="chat-outline" size={64} color={colors.divider} />
-                            <Text style={{ color: colors.textTertiary }}>{t('noMessagesYet')}</Text>
-                        </View>
-                    }
-                    onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-                />
+                {wallpaper && wallpaper !== 'default' ? (
+                    <ImageBackground
+                        source={wallpaper.startsWith('#') ? null : { uri: wallpaper }}
+                        style={[s.flex, { backgroundColor: wallpaper.startsWith('#') ? wallpaper : 'transparent' }]}
+                    >
+                        <FlatList
+                            ref={listRef}
+                            data={messages}
+                            keyExtractor={item => item.id}
+                            renderItem={renderMessage}
+                            contentContainerStyle={s.msgList}
+                            ListEmptyComponent={
+                                <View style={s.center}>
+                                    <MaterialCommunityIcons name="chat-outline" size={64} color={colors.divider} />
+                                    <Text style={{ color: colors.textTertiary }}>{t('noMessagesYet')}</Text>
+                                </View>
+                            }
+                            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                        />
+                    </ImageBackground>
+                ) : (
+                    <FlatList
+                        ref={listRef}
+                        data={messages}
+                        keyExtractor={item => item.id}
+                        renderItem={renderMessage}
+                        contentContainerStyle={s.msgList}
+                        ListEmptyComponent={
+                            <View style={s.center}>
+                                <MaterialCommunityIcons name="chat-outline" size={64} color={colors.divider} />
+                                <Text style={{ color: colors.textTertiary }}>{t('noMessagesYet')}</Text>
+                            </View>
+                        }
+                        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                    />
+                )}
 
                 <View style={[s.inputBar, { backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.divider }]}>
                     <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>

@@ -20,6 +20,8 @@ import {
     RTCView,
     mediaDevices,
 } from 'react-native-webrtc';
+import InCallManager from 'react-native-incall-manager';
+import Sound from 'react-native-sound';
 import { colors, spacing, borderRadius } from '../../constants';
 import { callService } from '../../services/callService';
 import { useAuth } from '../../hooks/useAuth';
@@ -32,6 +34,9 @@ const avatarColor = (name = '') => {
     const p = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#BB86FC', '#03DAC6'];
     return p[name.charCodeAt(0) % p.length];
 };
+
+// ─── Tone Constants ───────────────────────────────────────────────────────────
+const DIALING_TONE_URL = 'https://assets.mixkit.co/sfx/preview/mixkit-outgoing-call-waiting-tone-2869.mp3';
 
 // ─── Pulse Ring Animation ─────────────────────────────────────────────────────
 const PulseRing = ({ color }) => {
@@ -72,7 +77,7 @@ const PulseRing = ({ color }) => {
 };
 
 // ─── Control Button ───────────────────────────────────────────────────────────
-const ControlBtn = ({ icon, label, onPress, active = false, danger = false, size = 56 }) => (
+const ControlBtn = ({ icon, label, onPress, active = false, danger = false, size = 56, color: iconColor = "white" }) => (
     <TouchableOpacity style={ctrl.wrap} onPress={onPress} activeOpacity={0.8}>
         <View style={[
             ctrl.btn,
@@ -80,7 +85,7 @@ const ControlBtn = ({ icon, label, onPress, active = false, danger = false, size
             danger && ctrl.danger,
             active && ctrl.active,
         ]}>
-            <Ionicons name={icon} size={size === 72 ? 30 : 24} color="white" />
+            <Ionicons name={icon} size={size === 72 ? 30 : 24} color={iconColor} />
         </View>
         {label ? <Text style={ctrl.label}>{label}</Text> : null}
     </TouchableOpacity>
@@ -89,7 +94,7 @@ const ControlBtn = ({ icon, label, onPress, active = false, danger = false, size
 // ─── CALL SCREEN ──────────────────────────────────────────────────────────────
 export const CallScreen = ({ route, navigation }) => {
     const { user } = useAuth();
-    const { otherUser, callType = 'voice', isInitiator = false, existingCallId, offer } = route.params || {};
+    const { otherUser, callType: initialCallType = 'voice', isInitiator = false, existingCallId, offer } = route.params || {};
 
     const [localStream, setLocalStream] = useState(null);
     const [remoteStream, setRemoteStream] = useState(null);
@@ -97,13 +102,15 @@ export const CallScreen = ({ route, navigation }) => {
 
     const [duration, setDuration] = useState(0);
     const [muted, setMuted] = useState(false);
-    const [speakerOn, setSpeakerOn] = useState(false);
+    const [speakerOn, setSpeakerOn] = useState(initialCallType === 'video');
     const [videoOff, setVideoOff] = useState(false);
     const [isFrontCamera, setIsFrontCamera] = useState(true);
     const [callState, setCallState] = useState('connecting'); // connecting | active | ended
+    const [isAccepted, setIsAccepted] = useState(isInitiator);
+    const [callType, setCallType] = useState(initialCallType);
 
     const pc = useRef(null);
-    // const candidateStore = useRef([]); // unused
+    const ringtone = useRef(null);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(40)).current;
@@ -112,6 +119,17 @@ export const CallScreen = ({ route, navigation }) => {
     const acColor = avatarColor(name);
     const hasPhoto = !!otherUser?.photoURL;
     const isVideo = callType === 'video';
+
+    const safeGoBack = () => {
+        if (navigation.canGoBack()) {
+            navigation.goBack();
+        } else {
+            navigation.reset({
+                index: 0,
+                routes: [{ name: 'MainApp' }],
+            });
+        }
+    };
 
     const configuration = {
         iceServers: [
@@ -130,23 +148,36 @@ export const CallScreen = ({ route, navigation }) => {
             Animated.spring(slideAnim, { toValue: 0, speed: 16, bounciness: 6, useNativeDriver: true }),
         ]).start();
 
+        // Start InCallManager
+        InCallManager.start({ media: callType });
+        InCallManager.setSpeakerphoneOn(speakerOn);
+
+        // Ringtone for initiator
+        if (isInitiator && isAccepted) {
+            ringtone.current = new Sound(DIALING_TONE_URL, null, (error) => {
+                if (error) {
+                    console.log('failed to load the sound', error);
+                    return;
+                }
+                ringtone.current.setNumberOfLoops(-1);
+                ringtone.current.play();
+            });
+        }
+
         const setupCall = async () => {
-            // Guard clause for missing user
             if (!otherUser?.uid) {
                 Alert.alert('Error', 'User information missing');
-                navigation.goBack();
+                safeGoBack();
                 return;
             }
 
             try {
-                // 1. Request Permissions
-                const hasPerms = await requestMediaPermissions(isVideo ? 'both' : 'camera'); // camera type in helper handles mic too
+                const hasPerms = await requestMediaPermissions(isVideo ? 'both' : 'camera');
                 if (!hasPerms) {
-                    navigation.goBack();
+                    safeGoBack();
                     return;
                 }
 
-                // 2. Get Local Stream
                 const stream = await mediaDevices.getUserMedia({
                     audio: true,
                     video: isVideo ? {
@@ -158,31 +189,32 @@ export const CallScreen = ({ route, navigation }) => {
                 });
                 if (mounted) setLocalStream(stream);
 
-                // 2. Setup Peer Connection
                 pc.current = new RTCPeerConnection(configuration);
 
-                // Add local stream to PC
                 stream.getTracks().forEach(track => {
                     pc.current.addTrack(track, stream);
                 });
 
-                // Handle remote tracks
                 pc.current.ontrack = (event) => {
-                    console.log('Remote track received:', event.streams[0]);
                     if (mounted) {
                         setRemoteStream(event.streams[0]);
                         setCallState('active');
+                        // Stop ringtone when active
+                        if (ringtone.current) {
+                            ringtone.current.stop(() => {
+                                ringtone.current.release();
+                                ringtone.current = null;
+                            });
+                        }
                     }
                 };
 
-                // Handle ICE candidates
                 pc.current.onicecandidate = (event) => {
                     if (event.candidate && callId) {
                         callService.addIceCandidate(callId, event.candidate, isInitiator ? 'initiator' : 'receiver');
                     }
                 };
 
-                // 3. Signaling roles
                 if (isInitiator) {
                     await initiateCall();
                 } else {
@@ -192,70 +224,74 @@ export const CallScreen = ({ route, navigation }) => {
             } catch (err) {
                 console.error('Call setup error:', err);
                 Alert.alert('Call Failed', 'Unable to start call. Check camera/mic permissions.');
-                navigation.goBack();
+                safeGoBack();
             }
         };
 
-        setupCall();
+        let unsubscribe;
+        if (callId) {
+            unsubscribe = callService.listenForCallUpdates(callId, (data) => {
+                if (data.status === 'ended') {
+                    handleEndCall();
+                }
+                if (data.callType && data.callType !== callType) {
+                    setCallType(data.callType);
+                }
+            });
+        }
+
+        if (isAccepted) {
+            setupCall();
+        }
 
         return () => {
             mounted = false;
+            if (unsubscribe) unsubscribe();
+            if (ringtone.current) {
+                ringtone.current.stop(() => ringtone.current.release());
+            }
+            InCallManager.stop();
             handleCleanup();
         };
-    }, []);
+    }, [isAccepted, callType]);
+
+    // Update speaker when state changes
+    useEffect(() => {
+        InCallManager.setSpeakerphoneOn(speakerOn);
+    }, [speakerOn]);
 
     const initiateCall = async () => {
-        // Create Offer
         const offerDescription = await pc.current.createOffer();
         await pc.current.setLocalDescription(offerDescription);
 
-        // Start Call in Firestore
         const id = await callService.startCall(user.uid, otherUser.uid, callType, offerDescription);
         setCallId(id);
 
-        // Listen for Answer
-        const unsubscribe = callService.listenForCallUpdates(id, (data) => {
+        callService.listenForCallUpdates(id, (data) => {
             if (data.answer && !pc.current.currentRemoteDescription) {
                 const answerDescription = new RTCSessionDescription(data.answer);
                 pc.current.setRemoteDescription(answerDescription);
             }
-            if (data.status === 'ended') {
-                handleEndCall();
-            }
         });
 
-        // Listen for Receiver ICE Candidates
-        const iceUnsubscribe = callService.listenForIceCandidates(id, 'receiver', (candidate) => {
+        callService.listenForIceCandidates(id, 'receiver', (candidate) => {
             pc.current.addIceCandidate(new RTCIceCandidate(candidate));
         });
-
-        return () => { unsubscribe(); iceUnsubscribe(); };
     };
 
     const handleIncomingCallRequest = async () => {
         if (!offer || !existingCallId) return;
 
-        // Set Remote Description (Offer)
         const offerDescription = new RTCSessionDescription(offer);
         await pc.current.setRemoteDescription(offerDescription);
 
-        // Create Answer
         const answerDescription = await pc.current.createAnswer();
         await pc.current.setLocalDescription(answerDescription);
 
-        // Save Answer to Firestore
         await callService.acceptCall(existingCallId, answerDescription);
 
-        // Listen for Initiator ICE Candidates
         callService.listenForIceCandidates(existingCallId, 'initiator', (candidate) => {
             pc.current.addIceCandidate(new RTCIceCandidate(candidate));
-        });
-
-        // Listen for status changes
-        callService.listenForCallUpdates(existingCallId, (data) => {
-            if (data.status === 'ended') {
-                handleEndCall();
-            }
         });
     };
 
@@ -272,7 +308,6 @@ export const CallScreen = ({ route, navigation }) => {
         }
     };
 
-    // Timer
     useEffect(() => {
         if (callState !== 'active') return;
         const interval = setInterval(() => setDuration(prev => prev + 1), 1000);
@@ -288,7 +323,7 @@ export const CallScreen = ({ route, navigation }) => {
     const handleEndCall = () => {
         setCallState('ended');
         handleCleanup();
-        setTimeout(() => navigation.goBack(), 400);
+        setTimeout(() => safeGoBack(), 400);
     };
 
     const toggleMute = () => {
@@ -315,10 +350,21 @@ export const CallScreen = ({ route, navigation }) => {
     };
 
     const toggleSpeaker = () => {
-        // Speaker handling is often platform dependent in react-native-webrtc.
-        // On some platforms, it's handled by other audio management libraries.
-        // For basic functionality, we toggle the state.
         setSpeakerOn(!speakerOn);
+    };
+
+    const convertToVideo = async () => {
+        if (isVideo) return;
+        try {
+            // Signal a switch to video
+            await callService.updateCallType(callId, 'video');
+            setCallType('video');
+            setSpeakerOn(true);
+            // In a real app, this would trigger a re-negotiation (offer/answer)
+            // For now, we update the local state and UI.
+        } catch (err) {
+            console.error('Conversion failed', err);
+        }
     };
 
     const statusLabel = () => {
@@ -327,29 +373,69 @@ export const CallScreen = ({ route, navigation }) => {
         return formatDuration(duration);
     };
 
+    // ─── Incoming Call UI View ───
+    if (!isInitiator && !isAccepted) {
+        return (
+            <View style={styles.container}>
+                <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+                <View style={[styles.bgAccent, { backgroundColor: acColor + '40', top: -height * 0.2 }]} />
+
+                <SafeAreaView style={styles.safe}>
+                    <View style={styles.incomingInfo}>
+                        <View style={styles.avatarWrap}>
+                            <PulseRing color={acColor} />
+                            {hasPhoto ? (
+                                <Image source={{ uri: otherUser.photoURL }} style={styles.avatar} />
+                            ) : (
+                                <View style={[styles.avatarFallback, { backgroundColor: acColor }]}>
+                                    <Text style={styles.avatarLetter}>{name.charAt(0).toUpperCase()}</Text>
+                                </View>
+                            )}
+                        </View>
+                        <Text style={styles.name}>{name}</Text>
+                        <Text style={styles.incomingLabel}>{isVideo ? 'Incoming Video Call...' : 'Incoming Voice Call...'}</Text>
+                    </View>
+
+                    <View style={styles.incomingActions}>
+                        <ControlBtn
+                            icon="close"
+                            label="Decline"
+                            danger
+                            size={72}
+                            onPress={handleEndCall}
+                        />
+                        <ControlBtn
+                            icon="call"
+                            label="Accept"
+                            size={72}
+                            color="#22C55E"
+                            onPress={() => setIsAccepted(true)}
+                        />
+                    </View>
+                </SafeAreaView>
+            </View>
+        );
+    }
+
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-            {/* Background gradient layers */}
             <View style={styles.bgTop} />
             <View style={styles.bgBottom} />
             <View style={[styles.bgAccent, { backgroundColor: acColor + '30' }]} />
 
             <SafeAreaView style={styles.safe}>
-
-                {/* ── Top bar ── */}
                 <Animated.View style={[styles.topBar, { opacity: fadeAnim }]}>
                     <View style={styles.encryptRow}>
                         <Ionicons name="shield-checkmark" size={13} color="rgba(255,255,255,0.55)" />
                         <Text style={styles.encryptText}>End-to-end encrypted</Text>
                     </View>
-                    <TouchableOpacity style={styles.minimizeBtn} onPress={() => navigation.goBack()}>
+                    <TouchableOpacity style={styles.minimizeBtn} onPress={() => safeGoBack()}>
                         <Ionicons name="chevron-down" size={22} color="rgba(255,255,255,0.8)" />
                     </TouchableOpacity>
                 </Animated.View>
 
-                {/* ── Video View ── */}
                 {isVideo && (
                     <View style={styles.videoGrid}>
                         {remoteStream && (
@@ -372,16 +458,13 @@ export const CallScreen = ({ route, navigation }) => {
                     </View>
                 )}
 
-                {/* ── User Info (Visible if audio or no remote video yet) ── */}
                 {(!isVideo || !remoteStream) && (
                     <Animated.View style={[styles.userSection, {
                         opacity: fadeAnim,
                         transform: [{ translateY: slideAnim }],
                     }]}>
-                        {/* Pulse rings while connecting */}
                         <View style={styles.avatarWrap}>
                             {callState === 'connecting' && <PulseRing color={acColor} />}
-
                             {hasPhoto ? (
                                 <Image source={{ uri: otherUser.photoURL }} style={styles.avatar} />
                             ) : (
@@ -391,20 +474,14 @@ export const CallScreen = ({ route, navigation }) => {
                                     </Text>
                                 </View>
                             )}
-
-                            {/* Online indicator */}
                             <View style={[styles.onlineDot, { backgroundColor: callState === 'active' ? '#22C55E' : '#F59E0B' }]} />
                         </View>
 
                         <Text style={styles.name}>{name}</Text>
-
                         <View style={styles.statusRow}>
-                            {callState === 'active' && (
-                                <View style={styles.activeDot} />
-                            )}
+                            {callState === 'active' && <View style={styles.activeDot} />}
                             <Text style={styles.statusText}>{statusLabel()}</Text>
                         </View>
-
                         <Text style={styles.callTypeLabel}>
                             {isVideo ? '📹 Video Call' : '📞 Voice Call'}
                         </Text>
@@ -413,7 +490,6 @@ export const CallScreen = ({ route, navigation }) => {
 
                 <View />
 
-                {/* ── Secondary Controls ── */}
                 <Animated.View style={[styles.secondaryControls, { opacity: fadeAnim }]}>
                     <ControlBtn
                         icon={muted ? 'mic-off' : 'mic'}
@@ -427,7 +503,7 @@ export const CallScreen = ({ route, navigation }) => {
                         onPress={toggleSpeaker}
                         active={speakerOn}
                     />
-                    {isVideo && (
+                    {isVideo ? (
                         <>
                             <ControlBtn
                                 icon={videoOff ? 'videocam-off' : 'videocam'}
@@ -441,15 +517,20 @@ export const CallScreen = ({ route, navigation }) => {
                                 onPress={switchCamera}
                             />
                         </>
+                    ) : (
+                        <ControlBtn
+                            icon="videocam"
+                            label="Video"
+                            onPress={convertToVideo}
+                        />
                     )}
                     <ControlBtn
                         icon="chatbubble-ellipses"
                         label="Message"
-                        onPress={() => navigation.goBack()}
+                        onPress={() => safeGoBack()}
                     />
                 </Animated.View>
 
-                {/* ── End Call Button ── */}
                 <Animated.View style={[styles.endCallWrap, { opacity: fadeAnim }]}>
                     <ControlBtn
                         icon="call"
@@ -459,17 +540,13 @@ export const CallScreen = ({ route, navigation }) => {
                         size={72}
                     />
                 </Animated.View>
-
             </SafeAreaView>
         </View>
     );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0F0F1A' },
-
-    // BG layers
     bgTop: {
         position: 'absolute', top: 0, left: 0, right: 0,
         height: height * 0.55,
@@ -490,10 +567,7 @@ const styles = StyleSheet.create({
         height: width + 200,
         borderRadius: (width + 200) / 2,
     },
-
     safe: { flex: 1, justifyContent: 'space-between' },
-
-    // Top bar
     topBar: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -508,9 +582,10 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.08)',
         justifyContent: 'center', alignItems: 'center',
     },
-
-    // User
     userSection: { alignItems: 'center', paddingTop: 30 },
+    incomingInfo: { alignItems: 'center', marginTop: height * 0.15 },
+    incomingLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 16, marginTop: 12, fontWeight: '500' },
+    incomingActions: { flexDirection: 'row', justifyContent: 'center', gap: 60, marginBottom: 80 },
     avatarWrap: {
         width: 160, height: 160,
         justifyContent: 'center', alignItems: 'center',
@@ -533,8 +608,6 @@ const styles = StyleSheet.create({
     activeDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
     statusText: { color: 'rgba(255,255,255,0.65)', fontSize: 16, fontWeight: '500' },
     callTypeLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 13, marginTop: 8 },
-
-    // Secondary controls
     secondaryControls: {
         flexDirection: 'row',
         justifyContent: 'center',
@@ -543,11 +616,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         marginBottom: 20,
     },
-
-    // End call
     endCallWrap: { alignItems: 'center', marginBottom: 40 },
-
-    // Video
     videoGrid: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
     remoteVideo: { flex: 1 },
     localVideoWrap: {

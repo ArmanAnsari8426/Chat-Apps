@@ -33,12 +33,16 @@ const formatTime = (ts) => {
     if (!ts) return '';
     const d = new Date(ts);
     const now = new Date();
-    const isToday = d.toDateString() === now.toDateString();
-    if (isToday) return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const diff = (now - d) / 1000;
+
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === d.toDateString();
+    if (isYesterday) return 'Yesterday';
+
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
 const cleanPreview = (lastMessage, t) => {
@@ -51,7 +55,7 @@ const cleanPreview = (lastMessage, t) => {
     return lastMessage;
 };
 
-const ChatItem = ({ chat, otherUser, unreadCount, onPress, colors, t }) => {
+const ChatItem = ({ chat, otherUser, unreadCount, onPress, colors, t, currentUserId }) => {
     const scaleAnim = useRef(new Animated.Value(1)).current;
 
     const isGroup = !!chat.members && !chat.creatorId;
@@ -64,6 +68,9 @@ const ChatItem = ({ chat, otherUser, unreadCount, onPress, colors, t }) => {
     const time = formatTime(chat.lastMessageTime);
     const hasUnread = unreadCount > 0;
     const isPro = otherUser?.isProfessional || false;
+    const isMe = chat.lastMessageSender === currentUserId;
+    const otherId = chat.participants?.find(id => id !== currentUserId);
+    const isRead = isMe ? (chat.unreadCount?.[otherId] === 0) : true;
 
     const onPressIn = () => Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true, speed: 40 }).start();
     const onPressOut = () => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 40 }).start();
@@ -116,12 +123,22 @@ const ChatItem = ({ chat, otherUser, unreadCount, onPress, colors, t }) => {
                         </Text>
                     </View>
                     <View style={styles.chatBottom}>
-                        <Text
-                            style={[styles.chatPreview, { color: colors.textSecondary }, hasUnread && { color: colors.text, fontWeight: '600' }]}
-                            numberOfLines={1}
-                        >
-                            {preview}
-                        </Text>
+                        <View style={styles.previewRow}>
+                            {isMe && (
+                                <Ionicons
+                                    name={isRead ? 'checkmark-done' : 'checkmark'}
+                                    size={14}
+                                    color={isRead ? colors.primary : colors.textTertiary}
+                                    style={{ marginRight: 4 }}
+                                />
+                            )}
+                            <Text
+                                style={[styles.chatPreview, { color: colors.textSecondary }, hasUnread && { color: colors.text, fontWeight: '600' }]}
+                                numberOfLines={1}
+                            >
+                                {preview}
+                            </Text>
+                        </View>
                         {hasUnread && (
                             <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
                                 <Text style={styles.unreadText}>
@@ -211,7 +228,11 @@ export const ChatsListScreen = ({ navigation }) => {
 
         const updateUnifiedList = () => {
             const combined = [...directChats_arr, ...groupChats_arr, ...broadcastLists_arr];
-            const sorted = combined.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+            const sorted = combined.sort((a, b) => {
+                const timeA = a.lastMessageTime || a.updatedAt?.toMillis?.() || 0;
+                const timeB = b.lastMessageTime || b.updatedAt?.toMillis?.() || 0;
+                return timeB - timeA;
+            });
             setChats(sorted);
         };
 
@@ -380,6 +401,7 @@ export const ChatsListScreen = ({ navigation }) => {
                         onPress={() => handleChatPress(item)}
                         colors={colors}
                         t={t}
+                        currentUserId={user.uid}
                     />
                 )}
                 refreshControl={
@@ -617,6 +639,11 @@ const styles = StyleSheet.create({
     },
     chatPreview: {
         fontSize: 13,
+        flex: 1,
+    },
+    previewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
         flex: 1,
     },
     unreadBadge: {

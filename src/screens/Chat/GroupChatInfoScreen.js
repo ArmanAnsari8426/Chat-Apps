@@ -38,27 +38,26 @@ const InfoCard = ({ children, title, colors, padding = true }) => (
 export const GroupChatInfoScreen = ({ route, navigation }) => {
     const { groupId } = route.params;
     const { user } = useAuth();
-    const { colors, t, activeTheme } = useSettings();
+    const { colors, t, activeTheme, chatWallpapers, updateChatWallpaper } = useSettings();
     const [group, setGroup] = useState(route.params.group || null);
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
 
     useEffect(() => {
-        if (groupId) {
-            fetchGroupInfo();
-        }
-    }, [groupId]);
+        if (!groupId) return;
 
-    const fetchGroupInfo = async () => {
         setLoading(true);
-        const data = await groupService.getGroupInfo(groupId);
-        if (data) {
-            setGroup(data);
-            fetchMemberDetails(data.members);
-        }
-        setLoading(false);
-    };
+        const unsubscribe = groupService.subscribeToGroup(groupId, (data) => {
+            if (data) {
+                setGroup(data);
+                fetchMemberDetails(data.members);
+            }
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [groupId]);
 
     const fetchMemberDetails = async (memberIds) => {
         const details = await Promise.all(memberIds.map(id => userService.getUserById(id)));
@@ -142,7 +141,13 @@ export const GroupChatInfoScreen = ({ route, navigation }) => {
 
                     {/* ── Group Actions Bar ── */}
                     <View style={styles.quickActions}>
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => { /* Add Member */ }}>
+                        <TouchableOpacity
+                            style={styles.actionBtn}
+                            onPress={() => navigation.navigate('AddMembers', {
+                                groupId,
+                                existingMembers: group?.members || []
+                            })}
+                        >
                             <View style={[styles.actionIcon, { backgroundColor: colors.bgSecondary }]}>
                                 <Ionicons name="person-add" size={20} color={colors.primary} />
                             </View>
@@ -172,15 +177,36 @@ export const GroupChatInfoScreen = ({ route, navigation }) => {
                     </View>
                 </InfoCard>
 
-                {/* ── Multimedia & Links ── */}
-                <InfoCard title={t('mediaLinksDocs') || 'Media, Links, and Docs'} colors={colors}>
-                    <TouchableOpacity style={styles.mediaRow} onPress={() => { /* Group Gallery */ }}>
-                        <View style={styles.mediaEmpty}>
-                            <Ionicons name="images" size={22} color={colors.textTertiary} />
-                            <Text style={[styles.mediaEmptyText, { color: colors.textTertiary }]}>{t('noMedia') || 'No shared media'}</Text>
+                {/* ── Chat Customization ── */}
+                <InfoCard title={t('chatSettings') || 'Chat Customization'} colors={colors}>
+                    <View style={styles.wallpaperSection}>
+                        <View style={styles.sectionHeader}>
+                            <Ionicons name="image-outline" size={20} color={colors.primary} />
+                            <Text style={[styles.sectionHeaderText, { color: colors.text }]}>{t('wallpaper') || 'Chat Wallpaper'}</Text>
                         </View>
-                        <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-                    </TouchableOpacity>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.wallpaperPicker}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.wallpaperOption,
+                                    { backgroundColor: colors.bgSecondary, borderColor: (chatWallpapers[groupId] || 'default') === 'default' ? colors.primary : colors.divider }
+                                ]}
+                                onPress={() => updateChatWallpaper(groupId, 'default')}
+                            >
+                                <Text style={[styles.wallpaperText, { color: colors.textSecondary }]}>{t('default')}</Text>
+                            </TouchableOpacity>
+
+                            {['#F0F2F5', '#E3F2FD', '#F5F5F5', '#E8F5E9', '#FFF3E0', '#F3E5F5'].map((color) => (
+                                <TouchableOpacity
+                                    key={color}
+                                    style={[
+                                        styles.wallpaperOption,
+                                        { backgroundColor: color, borderColor: chatWallpapers[groupId] === color ? colors.primary : colors.divider }
+                                    ]}
+                                    onPress={() => updateChatWallpaper(groupId, color)}
+                                />
+                            ))}
+                        </ScrollView>
+                    </View>
                 </InfoCard>
 
                 {/* ── Members List ── */}
@@ -191,7 +217,13 @@ export const GroupChatInfoScreen = ({ route, navigation }) => {
                             {idx < members.length - 1 && <View style={[styles.separator, { backgroundColor: colors.divider + '40' }]} />}
                         </View>
                     ))}
-                    <TouchableOpacity style={styles.addMemberRow}>
+                    <TouchableOpacity
+                        style={styles.addMemberRow}
+                        onPress={() => navigation.navigate('AddMembers', {
+                            groupId,
+                            existingMembers: group?.members || []
+                        })}
+                    >
                         <View style={[styles.addIconWrap, { backgroundColor: colors.primary + '15' }]}>
                             <Ionicons name="add" size={20} color={colors.primary} />
                         </View>
@@ -214,7 +246,7 @@ export const GroupChatInfoScreen = ({ route, navigation }) => {
                 </View>
 
             </ScrollView>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 };
 
@@ -261,4 +293,34 @@ const styles = StyleSheet.create({
     dangerZone: { marginTop: 32, paddingHorizontal: spacing.lg, marginBottom: 40 },
     dangerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 12, justifyContent: 'center' },
     dangerText: { fontSize: 16, fontWeight: '700' },
+    wallpaperSection: {
+        padding: spacing.sm,
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 16,
+    },
+    sectionHeaderText: {
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    wallpaperPicker: {
+        gap: 12,
+        paddingRight: 10,
+    },
+    wallpaperOption: {
+        width: 60,
+        height: 80,
+        borderRadius: 12,
+        borderWidth: 2,
+        justifyContent: 'center',
+        alignItems: 'center',
+        ...shadows.sm,
+    },
+    wallpaperText: {
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
 });

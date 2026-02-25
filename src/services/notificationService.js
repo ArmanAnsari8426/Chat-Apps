@@ -147,7 +147,7 @@ export const notificationService = {
     },
 
     /**
-     * Subscribe to user notifications
+     * Subscribe to user notifications (unread only)
      */
     subscribeToNotifications: (userId, callback) => {
         try {
@@ -173,4 +173,40 @@ export const notificationService = {
             return () => { };
         }
     },
+
+    /**
+     * Setup a global listener for new notifications to show alerts
+     */
+    setupForegroundListener: (userId, onNewNotification) => {
+        if (!userId) return () => { };
+
+        // We only care about notifications created AFTER the listener starts
+        const q_ref = query(
+            collection(db, 'notifications'),
+            where('userId', '==', userId),
+            where('read', '==', false),
+            orderBy('createdAt', 'desc'),
+            limit(1)
+        );
+
+        let initialLoad = true;
+        return onSnapshot(q_ref, (snapshot) => {
+            if (!snapshot) return;
+
+            if (initialLoad) {
+                initialLoad = false;
+                return;
+            }
+
+            if (!snapshot.empty) {
+                const doc = snapshot.docs[0];
+                const data = doc.data();
+                // Check if the timestamp is very recent (avoid old unread alerts)
+                const createdAt = data.createdAt?.toMillis() || Date.now();
+                if (Date.now() - createdAt < 10000) {
+                    onNewNotification({ id: doc.id, ...data });
+                }
+            }
+        });
+    }
 };

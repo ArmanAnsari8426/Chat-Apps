@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "338970152489",
+    "project_id": "newapp-95deb",
+    "storage_bucket": "newapp-95deb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:338970152489:android:333dc5b5a2aedfc1e39638",
+        "android_client_info": {
+          "package_name": "com.chatapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "338970152489-1gic257ta9d0m25e6qvfuff755b3tqnl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEOtP4LR2nNbWK9vp6_-5ATwWTZOeP2XU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "338970152489-1gic257ta9d0m25e6qvfuff755b3tqnl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:338970152489:android:a6e3787b29154ddfe39638",
+        "android_client_info": {
+          "package_name": "com.newapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "338970152489-1gic257ta9d0m25e6qvfuff755b3tqnl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEOtP4LR2nNbWK9vp6_-5ATwWTZOeP2XU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "338970152489-1gic257ta9d0m25e6qvfuff755b3tqnl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

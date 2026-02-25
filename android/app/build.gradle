@@ -1,7 +1,9 @@
-apply plugin: "com.android.application"
-apply plugin: "org.jetbrains.kotlin.android"
-apply plugin: "com.facebook.react"
-
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("com.facebook.react")
+    id("com.google.gms.google-services")
+}
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -116,4 +118,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    // Firebase BoM (Bill of Materials)
+    implementation(platform("com.google.firebase:firebase-bom:34.9.0"))
+    // For example: Firebase Analytics ya Auth add karna ho
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth")
+
 }
+
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")

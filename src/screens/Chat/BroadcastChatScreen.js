@@ -14,6 +14,7 @@ import {
     Dimensions,
     Alert,
     StatusBar,
+    ImageBackground,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -28,7 +29,7 @@ const { width } = Dimensions.get('window');
 export const BroadcastChatScreen = ({ route, navigation }) => {
     const { broadcastId } = route.params;
     const { user } = useAuth();
-    const { colors, t, activeTheme } = useSettings();
+    const { colors, t, activeTheme, wallpaper } = useSettings();
 
     const [broadcast, setBroadcast] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -151,22 +152,46 @@ export const BroadcastChatScreen = ({ route, navigation }) => {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-                <FlatList
-                    ref={listRef}
-                    data={messages}
-                    keyExtractor={item => item.id}
-                    renderItem={renderMessage}
-                    contentContainerStyle={s.msgList}
-                    ListEmptyComponent={
-                        <View style={s.center}>
-                            <MaterialCommunityIcons name="megaphone-outline" size={64} color={colors.divider} />
-                            <Text style={{ color: colors.textTertiary, textAlign: 'center', paddingHorizontal: 40 }}>
-                                {t('broadcastEmptyDesc').replace('{recipientCount}', recipientCount)}
-                            </Text>
-                        </View>
-                    }
-                    onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-                />
+                {wallpaper && wallpaper !== 'default' ? (
+                    <ImageBackground
+                        source={wallpaper.startsWith('#') ? null : { uri: wallpaper }}
+                        style={[s.flex, { backgroundColor: wallpaper.startsWith('#') ? wallpaper : 'transparent' }]}
+                    >
+                        <FlatList
+                            ref={listRef}
+                            data={messages}
+                            keyExtractor={item => item.id}
+                            renderItem={renderMessage}
+                            contentContainerStyle={s.msgList}
+                            ListEmptyComponent={
+                                <View style={s.center}>
+                                    <MaterialCommunityIcons name="megaphone-outline" size={64} color={colors.divider} />
+                                    <Text style={{ color: colors.textTertiary, textAlign: 'center', paddingHorizontal: 40 }}>
+                                        {t('broadcastEmptyDesc').replace('{recipientCount}', recipientCount)}
+                                    </Text>
+                                </View>
+                            }
+                            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                        />
+                    </ImageBackground>
+                ) : (
+                    <FlatList
+                        ref={listRef}
+                        data={messages}
+                        keyExtractor={item => item.id}
+                        renderItem={renderMessage}
+                        contentContainerStyle={s.msgList}
+                        ListEmptyComponent={
+                            <View style={s.center}>
+                                <MaterialCommunityIcons name="megaphone-outline" size={64} color={colors.divider} />
+                                <Text style={{ color: colors.textTertiary, textAlign: 'center', paddingHorizontal: 40 }}>
+                                    {t('broadcastEmptyDesc').replace('{recipientCount}', recipientCount)}
+                                </Text>
+                            </View>
+                        }
+                        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                    />
+                )}
 
                 <View style={[s.inputBar, { backgroundColor: colors.card, borderTopColor: colors.divider }]}>
                     <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>

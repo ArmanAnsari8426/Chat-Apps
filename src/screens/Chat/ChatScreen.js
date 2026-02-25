@@ -16,9 +16,12 @@ import {
     Alert,
     Modal,
     StatusBar,
+    ImageBackground,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import { doc, onSnapshot } from '@react-native-firebase/firestore';
+import { db } from '../../firebase';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import { spacing, borderRadius, shadows } from '../../constants';
 import { chatService } from '../../services/chatService';
@@ -38,7 +41,11 @@ const avatarColor = (name = '') => {
 export const ChatScreen = ({ route, navigation }) => {
     const { otherUserId } = route.params;
     const { user } = useAuth();
-    const { colors, t, activeTheme } = useSettings();
+    const { colors, t, activeTheme, setActiveChat, wallpaper: globalWallpaper, chatWallpapers, mediaQuality } = useSettings();
+
+    const currentChatId = (user && otherUserId) ? chatService.getChatId(user.uid, otherUserId) : null;
+    const perChatWallpaper = currentChatId ? chatWallpapers[currentChatId] : null;
+    const wallpaper = (perChatWallpaper && perChatWallpaper !== 'default') ? perChatWallpaper : globalWallpaper;
 
     const [messages, setMessages] = useState([]);
     const [messageText, setMessageText] = useState('');
@@ -50,6 +57,8 @@ export const ChatScreen = ({ route, navigation }) => {
     const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
     const [previewImageUrl, setPreviewImageUrl] = useState(null);
     const [attachVisible, setAttachVisible] = useState(false);
+    const [isBlocked, setIsBlocked] = useState(false);
+    const [hasBlockedMe, setHasBlockedMe] = useState(false);
 
     const typingTimeout = useRef(null);
     const listRef = useRef(null);
@@ -57,12 +66,18 @@ export const ChatScreen = ({ route, navigation }) => {
 
     useEffect(() => {
         navigation.setOptions({ headerShown: false });
-    }, []);
+        setActiveChat({ type: 'direct', id: otherUserId });
+        return () => setActiveChat(null);
+    }, [navigation, otherUserId, setActiveChat]);
 
     useEffect(() => {
         if (!user || !otherUserId) return;
         const unsub = userService.subscribeToUserPresence(otherUserId, (data) => {
-            if (data) setOtherUser(data);
+            if (data) {
+                setOtherUser(data);
+                // Check if they have blocked me
+                setHasBlockedMe(data.blockedUsers?.includes(user.uid) || false);
+            }
             setLoading(false);
         });
         return unsub;
@@ -70,11 +85,23 @@ export const ChatScreen = ({ route, navigation }) => {
 
     useEffect(() => {
         if (!user || !otherUserId) return;
+        // Check if I have blocked them
+        const unsub = onSnapshot(doc(db, 'users', user.uid), (snap) => {
+            if (snap.exists()) {
+                const blockedList = snap.data().blockedUsers || [];
+                setIsBlocked(blockedList.includes(otherUserId));
+            }
+        });
+        return unsub;
+    }, [user, otherUserId]);
+
+    useEffect(() => {
+        if (!user || !otherUserId) return;
         const chatId = chatService.getChatId(user.uid, otherUserId);
-        const unsub = chatService.subscribeToMessages(chatId, (msgs) => {
+        const unsub = chatService.subscribeToMessages(chatId, user.uid, (msgs) => {
             setMessages(msgs);
             const unread = msgs.filter(m => m.senderId !== user.uid && !m.read);
-            if (unread.length) chatService.markMessagesAsRead(chatId, unread.map(m => m.id));
+            if (unread.length) chatService.markMessagesAsRead(chatId, unread.map(m => m.id), user.uid);
             setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
         });
         return unsub;
@@ -123,7 +150,7 @@ export const ChatScreen = ({ route, navigation }) => {
             Alert.alert('Permission Denied', 'Camera and Storage permissions are required to share photos.');
             return;
         }
-        const opts = { mediaType: 'photo', quality: 0.8, maxWidth: 1200, maxHeight: 1200 };
+        const opts = { mediaType: 'photo', quality: mediaQuality || 0.8, maxWidth: 1200, maxHeight: 1200 };
         const pickerFunc = fromCamera ? launchCamera : launchImageLibrary;
         pickerFunc(opts, async (res) => {
             try {
@@ -259,15 +286,32 @@ export const ChatScreen = ({ route, navigation }) => {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={0}
             >
-                <FlatList
-                    ref={listRef}
-                    data={messages}
-                    keyExtractor={item => item.id}
-                    renderItem={renderMessage}
-                    contentContainerStyle={s.msgList}
-                    ListEmptyComponent={<EmptyMessages colors={colors} />}
-                    onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-                />
+                {wallpaper && wallpaper !== 'default' ? (
+                    <ImageBackground
+                        source={wallpaper.startsWith('#') ? null : { uri: wallpaper }}
+                        style={[s.flex, { backgroundColor: wallpaper.startsWith('#') ? wallpaper : 'transparent' }]}
+                    >
+                        <FlatList
+                            ref={listRef}
+                            data={messages}
+                            keyExtractor={item => item.id}
+                            renderItem={renderMessage}
+                            contentContainerStyle={s.msgList}
+                            ListEmptyComponent={<EmptyMessages colors={colors} />}
+                            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                        />
+                    </ImageBackground>
+                ) : (
+                    <FlatList
+                        ref={listRef}
+                        data={messages}
+                        keyExtractor={item => item.id}
+                        renderItem={renderMessage}
+                        contentContainerStyle={s.msgList}
+                        ListEmptyComponent={<EmptyMessages colors={colors} />}
+                        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                    />
+                )}
 
                 {otherUserTyping && (
                     <View style={s.typingRow}>
@@ -282,37 +326,56 @@ export const ChatScreen = ({ route, navigation }) => {
                     </View>
                 )}
 
-                <View style={[s.inputBar, { backgroundColor: colors.card, borderTopColor: colors.divider }]}>
-                    <TouchableOpacity style={s.attachBtn} onPress={() => setAttachVisible(true)}>
-                        <Ionicons name="add-circle" size={30} color={colors.primary} />
-                    </TouchableOpacity>
-
-                    <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>
-                        <TextInput
-                            style={[s.input, { color: colors.text }]}
-                            placeholder="Message..."
-                            placeholderTextColor={colors.textTertiary}
-                            value={messageText}
-                            onChangeText={handleTyping}
-                            multiline
-                            maxLength={1000}
-                            editable={!sending}
-                        />
+                {(isBlocked || hasBlockedMe) ? (
+                    <View style={[s.blockedContainer, { backgroundColor: colors.card, borderTopColor: colors.divider }]}>
+                        <Text style={[s.blockedText, { color: colors.textSecondary }]}>
+                            {isBlocked ? t('youBlockedThisContact') || 'You blocked this contact. Unblock to send messages.' : t('contactHasBlockedYou') || 'You cannot send messages to this contact.'}
+                        </Text>
+                        {isBlocked && (
+                            <TouchableOpacity
+                                style={[s.unblockInlineBtn, { backgroundColor: colors.primary }]}
+                                onPress={async () => {
+                                    const res = await userService.unblockUser(user.uid, otherUserId);
+                                    if (res.success) setIsBlocked(false);
+                                }}
+                            >
+                                <Text style={s.unblockInlineText}>{t('unblock') || 'Unblock'}</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
-
-                    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-                        <TouchableOpacity
-                            style={[s.sendBtn, { backgroundColor: colors.primary }, (!messageText.trim() || sending) && s.sendBtnDisabled]}
-                            onPress={handleSend}
-                            disabled={sending || !messageText.trim()}
-                        >
-                            {sending
-                                ? <ActivityIndicator size="small" color="white" />
-                                : <Ionicons name="send" size={18} color="white" />
-                            }
+                ) : (
+                    <View style={[s.inputBar, { backgroundColor: colors.card, borderTopColor: colors.divider }]}>
+                        <TouchableOpacity style={s.attachBtn} onPress={() => setAttachVisible(true)}>
+                            <Ionicons name="add-circle" size={30} color={colors.primary} />
                         </TouchableOpacity>
-                    </Animated.View>
-                </View>
+
+                        <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>
+                            <TextInput
+                                style={[s.input, { color: colors.text }]}
+                                placeholder="Message..."
+                                placeholderTextColor={colors.textTertiary}
+                                value={messageText}
+                                onChangeText={handleTyping}
+                                multiline
+                                maxLength={1000}
+                                editable={!sending}
+                            />
+                        </View>
+
+                        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                            <TouchableOpacity
+                                style={[s.sendBtn, { backgroundColor: colors.primary }, (!messageText.trim() || sending) && s.sendBtnDisabled]}
+                                onPress={handleSend}
+                                disabled={sending || !messageText.trim()}
+                            >
+                                {sending
+                                    ? <ActivityIndicator size="small" color="white" />
+                                    : <Ionicons name="send" size={18} color="white" />
+                                }
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </View>
+                )}
             </KeyboardAvoidingView>
 
             <AttachMenu
@@ -394,9 +457,9 @@ const MessageBubble = ({ message, isSender, senderName, senderPhoto, onImagePres
                     {isSender && (
                         <Ionicons
                             name={message.read ? 'checkmark-done' : 'checkmark'}
-                            size={13}
-                            color={message.read ? '#93C5FD' : 'rgba(255,255,255,0.5)'}
-                            style={{ marginLeft: 3 }}
+                            size={16}
+                            color={message.read ? colors.primaryLight || '#93C5FD' : 'rgba(255,255,255,0.6)'}
+                            style={{ marginLeft: 4 }}
                         />
                     )}
                 </View>
@@ -505,6 +568,27 @@ const s = StyleSheet.create({
     input: { fontSize: 15, paddingVertical: 8, maxHeight: 100 },
     sendBtn: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center', ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 8 }, android: { elevation: 4 } }) },
     sendBtnDisabled: { opacity: 0.45 },
+    blockedContainer: {
+        padding: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderTopWidth: 1,
+    },
+    blockedText: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    unblockInlineBtn: {
+        paddingVertical: 8,
+        paddingHorizontal: 24,
+        borderRadius: 20,
+    },
+    unblockInlineText: {
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
 });
 
 const b = StyleSheet.create({

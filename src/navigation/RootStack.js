@@ -15,6 +15,7 @@ import { UserProfileScreen } from '../screens/User/UserProfileScreen';
 import { ChatInfoScreen } from '../screens/Chat/ChatInfoScreen';
 import { GroupChatScreen } from '../screens/Chat/GroupChatScreen';
 import { GroupChatInfoScreen } from '../screens/Chat/GroupChatInfoScreen';
+import { AddMembersScreen } from '../screens/Group/AddMembersScreen';
 import { BroadcastChatScreen } from '../screens/Chat/BroadcastChatScreen';
 import { CallScreen } from '../screens/Chat/CallScreen';
 import { SettingsScreen } from '../screens/Settings/SettingsScreen'; // Added
@@ -26,6 +27,7 @@ import { callService } from '../services/callService';
 import { userService } from '../services/userService';
 import { useEffect } from 'react';
 import { useSettings } from '../context/SettingsContext';
+import { NotificationHandler } from '../components/NotificationHandler';
 import { DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
 
@@ -84,6 +86,7 @@ export const RootStack = () => {
                 backgroundColor={colors.card}
             />
             <CallManager />
+            <NotificationHandler />
             <Stack.Navigator
                 screenOptions={{
                     headerShown: false,
@@ -159,6 +162,14 @@ export const RootStack = () => {
                             name="GroupChatInfo"
                             component={GroupChatInfoScreen}
                             options={{ animation: 'slide_from_right' }}
+                        />
+                        <Stack.Screen
+                            name="AddMembers"
+                            component={AddMembersScreen}
+                            options={{
+                                presentation: 'modal',
+                                animation: 'slide_from_bottom'
+                            }}
                         />
                         <Stack.Screen
                             name="BroadcastChat"

@@ -80,6 +80,19 @@ export const PrivacyScreen = ({ navigation }) => {
                             />
                         </View>
                     </View>
+
+                    <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginTop: 24 }]}>{t('blockedUsers') || 'Blocked Contacts'}</Text>
+                    <View style={[styles.card, { backgroundColor: colors.card }]}>
+                        <TouchableOpacity style={styles.settingRow} onPress={() => navigation.navigate('BlockedUsers')}>
+                            <View style={styles.rowLeft}>
+                                <View style={[styles.iconWrap, { backgroundColor: colors.error + '15' }]}>
+                                    <Ionicons name="ban-outline" size={20} color={colors.error} />
+                                </View>
+                                <Text style={[styles.rowLabel, { color: colors.text }]}>{t('blockedUsers') || 'Blocked Users'}</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </ScrollView>
         </SafeAreaView>
