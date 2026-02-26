@@ -14,10 +14,14 @@ export const requestMediaPermissions = async (type = 'both') => {
         const platformVersion = parseInt(Platform.Version, 10);
         let permissions = [];
 
+        // Microphone Permission
+        if (type === 'microphone' || type === 'camera' || type === 'both') {
+            permissions.push(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+        }
+
         // Camera Permission
         if (type === 'camera' || type === 'both') {
             permissions.push(PermissionsAndroid.PERMISSIONS.CAMERA);
-            permissions.push(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
         }
 
         // Storage/Media Permission

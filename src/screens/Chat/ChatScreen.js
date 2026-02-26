@@ -30,6 +30,8 @@ import { requestMediaPermissions } from '../../utils/permissionHelper';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMessageDate } from '../../utils/dateUtils';
 import { useSettings } from '../../context/SettingsContext';
+import { VoiceRecorder } from '../../components/VoiceRecorder';
+import { VoicePlayer } from '../../components/VoicePlayer';
 
 const { width, height } = Dimensions.get('window');
 
@@ -59,6 +61,7 @@ export const ChatScreen = ({ route, navigation }) => {
     const [attachVisible, setAttachVisible] = useState(false);
     const [isBlocked, setIsBlocked] = useState(false);
     const [hasBlockedMe, setHasBlockedMe] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
 
     const typingTimeout = useRef(null);
     const listRef = useRef(null);
@@ -167,6 +170,15 @@ export const ChatScreen = ({ route, navigation }) => {
                 setUploading(false);
             }
         });
+    };
+
+    const handleSendVoice = async (uri, duration) => {
+        setIsRecording(false);
+        setSending(true);
+        const chatId = chatService.getChatId(user.uid, otherUserId);
+        const result = await chatService.sendVoiceMessage(chatId, user.uid, uri, duration);
+        if (!result.success) Alert.alert('Error', result.error || 'Failed to send voice note');
+        setSending(false);
     };
 
     const handleCall = async (type) => {
@@ -343,6 +355,12 @@ export const ChatScreen = ({ route, navigation }) => {
                             </TouchableOpacity>
                         )}
                     </View>
+                ) : isRecording ? (
+                    <VoiceRecorder
+                        colors={colors}
+                        onSend={handleSendVoice}
+                        onCancel={() => setIsRecording(false)}
+                    />
                 ) : (
                     <View style={[s.inputBar, { backgroundColor: colors.card, borderTopColor: colors.divider }]}>
                         <TouchableOpacity style={s.attachBtn} onPress={() => setAttachVisible(true)}>
@@ -362,18 +380,28 @@ export const ChatScreen = ({ route, navigation }) => {
                             />
                         </View>
 
-                        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                        {messageText.trim() ? (
+                            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                                <TouchableOpacity
+                                    style={[s.sendBtn, { backgroundColor: colors.primary }, (!messageText.trim() || sending) && s.sendBtnDisabled]}
+                                    onPress={handleSend}
+                                    disabled={sending || !messageText.trim()}
+                                >
+                                    {sending
+                                        ? <ActivityIndicator size="small" color="white" />
+                                        : <Ionicons name="send" size={18} color="white" />
+                                    }
+                                </TouchableOpacity>
+                            </Animated.View>
+                        ) : (
                             <TouchableOpacity
-                                style={[s.sendBtn, { backgroundColor: colors.primary }, (!messageText.trim() || sending) && s.sendBtnDisabled]}
-                                onPress={handleSend}
-                                disabled={sending || !messageText.trim()}
+                                style={[s.sendBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => setIsRecording(true)}
+                                disabled={sending}
                             >
-                                {sending
-                                    ? <ActivityIndicator size="small" color="white" />
-                                    : <Ionicons name="send" size={18} color="white" />
-                                }
+                                <Ionicons name="mic" size={20} color="white" />
                             </TouchableOpacity>
-                        </Animated.View>
+                        )}
                     </View>
                 )}
             </KeyboardAvoidingView>
@@ -405,6 +433,7 @@ const MessageBubble = ({ message, isSender, senderName, senderPhoto, onImagePres
     const isDeleted = !!message.deletedAt;
     const isImage = message.type === 'image';
     const isCall = message.type === 'call';
+    const isVoice = message.type === 'voice';
 
     return (
         <View style={[b.row, isSender && b.rowSender]}>
@@ -421,6 +450,7 @@ const MessageBubble = ({ message, isSender, senderName, senderPhoto, onImagePres
                 isSender ? [b.bubbleSender, { backgroundColor: colors.primary }] : [b.bubbleReceiver, { backgroundColor: colors.card }],
                 isImage && b.bubbleImage,
                 isCall && b.bubbleCall,
+                isVoice && b.bubbleVoice,
                 isDeleted && [b.bubbleDeleted, { backgroundColor: colors.bgSecondary, borderColor: colors.divider }],
             ]}>
                 {isCall && (
@@ -442,7 +472,16 @@ const MessageBubble = ({ message, isSender, senderName, senderPhoto, onImagePres
                     </TouchableOpacity>
                 )}
 
-                {!isImage && !isCall && (
+                {isVoice && !isDeleted && (
+                    <VoicePlayer
+                        url={message.voiceUrl}
+                        duration={message.duration}
+                        isSender={isSender}
+                        colors={colors}
+                    />
+                )}
+
+                {!isImage && !isCall && !isVoice && (
                     <Text style={[b.text, isSender ? { color: 'white' } : { color: colors.text }, isDeleted && { color: colors.textTertiary, fontStyle: 'italic' }]}>
                         {isDeleted ? '🚫 Message deleted' : message.text}
                     </Text>
@@ -601,6 +640,7 @@ const b = StyleSheet.create({
     bubbleSender: { borderBottomRightRadius: 4 },
     bubbleReceiver: { borderBottomLeftRadius: 4, ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.07, shadowRadius: 3 }, android: { elevation: 1 } }) },
     bubbleImage: { padding: 3, overflow: 'hidden' },
+    bubbleVoice: { paddingVertical: 10, paddingHorizontal: 12 },
     bubbleDeleted: { borderWidth: 1 },
     callRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     callIconBg: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },

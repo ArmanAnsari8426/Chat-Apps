@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
-    TextInput,
     TouchableOpacity,
     StyleSheet,
     FlatList,
@@ -12,19 +11,22 @@ import {
     SafeAreaView,
     Animated,
     Dimensions,
-    Image,
     Alert,
+    Image,
     StatusBar,
-    ImageBackground,
+    TextInput,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { spacing, borderRadius, shadows } from '../../constants';
 import { groupService } from '../../services/groupService';
 import { userService } from '../../services/userService';
+import { chatService } from '../../services/chatService';
 import { useAuth } from '../../hooks/useAuth';
 import { formatMessageDate } from '../../utils/dateUtils';
 import { useSettings } from '../../context/SettingsContext';
+import { VoiceRecorder } from '../../components/VoiceRecorder';
+import { VoicePlayer } from '../../components/VoicePlayer';
 
 const { width } = Dimensions.get('window');
 
@@ -46,6 +48,7 @@ export const GroupChatScreen = ({ route, navigation }) => {
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
     const [memberNames, setMemberNames] = useState({});
 
     const listRef = useRef(null);
@@ -112,6 +115,14 @@ export const GroupChatScreen = ({ route, navigation }) => {
         setSending(false);
     };
 
+    const handleSendVoice = async (uri, duration) => {
+        setIsRecording(false);
+        setSending(true);
+        const result = await chatService.sendVoiceMessage(groupId, user.uid, uri, duration);
+        if (!result.success) Alert.alert('Error', result.error || 'Failed to send voice note');
+        setSending(false);
+    };
+
     const renderMessage = ({ item, index }) => {
         const timestamp = item.timestamp?.toMillis ? item.timestamp.toMillis() : item.timestamp;
         const curDate = new Date(timestamp).toDateString();
@@ -132,15 +143,25 @@ export const GroupChatScreen = ({ route, navigation }) => {
                     <View style={[
                         b.bubble,
                         isSender ? [b.bubbleSender, { backgroundColor: colors.primary }] : [b.bubbleReceiver, { backgroundColor: colors.card }],
+                        item.type === 'voice' && b.bubbleVoice,
                     ]}>
                         {!isSender && (
                             <Text style={[b.senderName, { color: avatarColor(senderName) }]}>
                                 {senderName}
                             </Text>
                         )}
-                        <Text style={[b.text, { color: isSender ? 'white' : colors.text }]}>
-                            {item.text}
-                        </Text>
+                        {item.type === 'voice' ? (
+                            <VoicePlayer
+                                url={item.voiceUrl}
+                                duration={item.duration}
+                                isSender={isSender}
+                                colors={colors}
+                            />
+                        ) : (
+                            <Text style={[b.text, { color: isSender ? 'white' : colors.text }]}>
+                                {item.text}
+                            </Text>
+                        )}
                         <View style={b.meta}>
                             <Text style={[b.time, { color: isSender ? 'rgba(255,255,255,0.7)' : colors.textTertiary }]}>
                                 {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -205,25 +226,21 @@ export const GroupChatScreen = ({ route, navigation }) => {
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
                 {wallpaper && wallpaper !== 'default' ? (
-                    <ImageBackground
-                        source={wallpaper.startsWith('#') ? null : { uri: wallpaper }}
-                        style={[s.flex, { backgroundColor: wallpaper.startsWith('#') ? wallpaper : 'transparent' }]}
-                    >
+                    <View style={s.flex}>
+                        <Image
+                            source={wallpaper.startsWith('#') ? null : { uri: wallpaper }}
+                            style={[StyleSheet.absoluteFill, { backgroundColor: wallpaper.startsWith('#') ? wallpaper : 'transparent' }]}
+                            resizeMode="cover"
+                        />
                         <FlatList
                             ref={listRef}
                             data={messages}
                             keyExtractor={item => item.id}
                             renderItem={renderMessage}
                             contentContainerStyle={s.msgList}
-                            ListEmptyComponent={
-                                <View style={s.center}>
-                                    <MaterialCommunityIcons name="chat-outline" size={64} color={colors.divider} />
-                                    <Text style={{ color: colors.textTertiary }}>{t('noMessagesYet')}</Text>
-                                </View>
-                            }
-                            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
                         />
-                    </ImageBackground>
+                    </View>
                 ) : (
                     <FlatList
                         ref={listRef}
@@ -237,32 +254,59 @@ export const GroupChatScreen = ({ route, navigation }) => {
                                 <Text style={{ color: colors.textTertiary }}>{t('noMessagesYet')}</Text>
                             </View>
                         }
-                        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+                        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
                     />
                 )}
 
-                <View style={[s.inputBar, { backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.divider }]}>
-                    <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>
-                        <TextInput
-                            style={[s.input, { color: colors.text }]}
-                            placeholder={t('messageGroup')}
-                            placeholderTextColor={colors.textTertiary}
-                            value={messageText}
-                            onChangeText={setMessageText}
-                            multiline
-                            maxLength={1000}
-                        />
-                    </View>
-                    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-                        <TouchableOpacity
-                            style={[s.sendBtn, { backgroundColor: colors.primary }, !messageText.trim() && s.sendBtnDisabled]}
-                            onPress={handleSend}
-                            disabled={sending || !messageText.trim()}
-                        >
-                            {sending ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="send" size={18} color="white" />}
+                {isRecording ? (
+                    <VoiceRecorder
+                        colors={colors}
+                        onSend={handleSendVoice}
+                        onCancel={() => setIsRecording(false)}
+                    />
+                ) : (
+                    <View style={[s.inputBar, { backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.divider }]}>
+                        <TouchableOpacity style={s.attachBtn}>
+                            <Ionicons name="add-circle" size={30} color={colors.primary} />
                         </TouchableOpacity>
-                    </Animated.View>
-                </View>
+
+                        <View style={[s.inputWrap, { backgroundColor: colors.bgSecondary }]}>
+                            <TextInput
+                                style={[s.input, { color: colors.text }]}
+                                placeholder={t('messageGroup')}
+                                placeholderTextColor={colors.textTertiary}
+                                value={messageText}
+                                onChangeText={setMessageText}
+                                multiline
+                                maxLength={1000}
+                                editable={!sending}
+                            />
+                        </View>
+
+                        {messageText.trim() ? (
+                            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                                <TouchableOpacity
+                                    style={[s.sendBtn, { backgroundColor: colors.primary }, (!messageText.trim() || sending) && s.sendBtnDisabled]}
+                                    onPress={handleSend}
+                                    disabled={sending || !messageText.trim()}
+                                >
+                                    {sending
+                                        ? <ActivityIndicator size="small" color="white" />
+                                        : <Ionicons name="send" size={18} color="white" />
+                                    }
+                                </TouchableOpacity>
+                            </Animated.View>
+                        ) : (
+                            <TouchableOpacity
+                                style={[s.sendBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => setIsRecording(true)}
+                                disabled={sending}
+                            >
+                                <Ionicons name="mic" size={20} color="white" />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
             </KeyboardAvoidingView>
         </SafeAreaView>
     );
@@ -302,6 +346,7 @@ const b = StyleSheet.create({
     bubble: { maxWidth: width * 0.75, borderRadius: 15, padding: 10 },
     bubbleSender: { borderBottomRightRadius: 2 },
     bubbleReceiver: { borderBottomLeftRadius: 2 },
+    bubbleVoice: { paddingVertical: 10, paddingHorizontal: 12 },
     senderName: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
     text: { fontSize: 15 },
     meta: { alignItems: 'flex-end', marginTop: 2 },

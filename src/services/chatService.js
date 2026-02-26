@@ -172,6 +172,64 @@ export const chatService = {
         }
     },
 
+    // ─── Upload voice note and send as message ─────────────────────────────────
+    sendVoiceMessage: async (chatId, senderId, localUri, duration) => {
+        try {
+            if (!chatId || !senderId || !localUri) {
+                return { success: false, error: 'Missing required fields' };
+            }
+
+            // 1. Upload audio to Cloudinary (use 'video' resource type for audio)
+            const voiceUrl = await uploadToCloudinary(localUri, 'video');
+
+            // 2. Save message with voice URL and duration
+            const chatRef = doc(db, 'chats', chatId);
+            const messagesRef = collection(chatRef, 'messages');
+
+            const newMessage = await addDoc(messagesRef, {
+                senderId,
+                text: '🎤 Voice note',
+                voiceUrl,
+                duration, // in milliseconds
+                type: 'voice',
+                timestamp: serverTimestamp(),
+                read: false,
+                deletedAt: null,
+            });
+
+            const otherId = chatId.split('_').find(id => id !== senderId);
+            const chatSnap = await getDoc(chatRef);
+            const currentUnread = chatSnap.data()?.unreadCount?.[otherId] || 0;
+
+            await setDoc(chatRef, {
+                lastMessage: '🎤 Voice note',
+                lastMessageTime: serverTimestamp(),
+                lastMessageSender: senderId,
+                updatedAt: serverTimestamp(),
+                unreadCount: {
+                    ...chatSnap.data()?.unreadCount,
+                    [otherId]: currentUnread + 1
+                }
+            }, { merge: true });
+
+            // ─── Trigger Notification ───
+            const senderSnap = await getDoc(doc(db, 'users', senderId));
+            const senderName = senderSnap.data()?.name || 'Someone';
+            await notificationService.createNotification(
+                otherId,
+                'message',
+                senderName,
+                '🎤 Sent a voice note',
+                { chatId, senderId, type: 'direct' }
+            );
+
+            return { success: true, messageId: newMessage.id, voiceUrl };
+        } catch (error) {
+            console.error('[ChatService] sendVoiceMessage failure:', error);
+            return { success: false, error: 'Failed to upload voice note.' };
+        }
+    },
+
     // ─── Edit message ──────────────────────────────────────────────────────────
     editMessage: async (chatId, messageId, newText, currentUserId) => {
         try {

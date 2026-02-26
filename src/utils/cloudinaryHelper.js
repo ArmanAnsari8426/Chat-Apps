@@ -9,33 +9,30 @@ const CLOUD_NAME = 'do9gl4cd9';
 const UPLOAD_PRESET = 'chat_app';
 
 /**
- * Uploads an image to Cloudinary using an unsigned preset.
- * @param {string} localUri - The file URI from image picker
- * @returns {Promise<string>} - The secure URL of the uploaded image
+ * Uploads a file to Cloudinary using an unsigned preset.
+ * @param {string} localUri - The file URI
+ * @param {string} resourceType - Cloudinary resource type ('image', 'video', 'raw', 'auto')
+ * @returns {Promise<string>} - The secure URL of the uploaded file
  */
-export const uploadToCloudinary = async (localUri) => {
+export const uploadToCloudinary = async (localUri, resourceType = 'image') => {
     try {
-        console.log('[Cloudinary] Starting upload for:', localUri);
+        console.log(`[Cloudinary] Starting ${resourceType} upload for:`, localUri);
 
         const data = new FormData();
-
-        // Handle physical file URI for both Android and iOS
-        let uri = localUri;
-        if (uri.startsWith('file://')) {
-            // No changes needed for fetch FormData usually
-        }
+        const timestamp = Date.now();
+        const extension = resourceType === 'image' ? 'jpg' : (resourceType === 'video' ? 'mp4' : 'm4a');
 
         data.append('file', {
             uri: localUri,
-            type: 'image/jpeg',
-            name: `upload_${Date.now()}.jpg`,
+            type: resourceType === 'image' ? 'image/jpeg' : (resourceType === 'video' ? 'video/mp4' : 'audio/m4a'),
+            name: `upload_${timestamp}.${extension}`,
         });
 
         data.append('upload_preset', UPLOAD_PRESET);
         data.append('cloud_name', CLOUD_NAME);
 
         const response = await fetch(
-            `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+            `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`,
             {
                 method: 'POST',
                 body: data,
